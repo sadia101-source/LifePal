@@ -1,0 +1,85 @@
+import { GoogleGenAI } from "@google/genai";
+
+export const config = {
+  maxDuration: 60,
+};
+
+const LIFEPAL_SYSTEM_INSTRUCTION = `
+You are the LifePal AI assistant, an expert in oncology care coordination and emotional support.
+MANDATORY: You must respond in the language specified in the user context ([LANG: ...]).
+If the language is Hindi, use clear and empathetic Devnagari script.
+If the language is Urdu, use professional and caring Nastaliq-compatible text.
+If the language is Telugu, use natural and comforting Telugu script.
+
+Follow clinical guardrails: NEVER provide a diagnosis, NEVER change or suggest medication dosages, and ALWAYS prioritize the Aligarh (JNMCH) institutional protocols.
+Maintain a gentle, sanctuary-like persona.
+`;
+
+export default async function handler(req: any, res: any) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  // Fix: Obtained API Key from environment variable process.env.API_KEY as per guidelines.
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'API_KEY missing in environment variables. Please check your Vercel project settings.' });
+
+  const { feature, contents, config: modelConfig } = req.body;
+
+  try {
+    // Fix: Using process.env.API_KEY directly in initialization as required by coding guidelines.
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const modelName = modelConfig?.model || 'gemini-3-flash-preview';
+
+    // Standardize contents format: SDK expects text, parts, or array of content objects
+    let formattedContents: any;
+    if (typeof contents === 'string') {
+      formattedContents = contents;
+    } else if (Array.isArray(contents)) {
+      formattedContents = contents;
+    } else if (contents.parts) {
+      formattedContents = contents;
+    } else {
+      formattedContents = JSON.stringify(contents);
+    }
+
+    const finalConfig: any = {
+      ...modelConfig,
+      systemInstruction: LIFEPAL_SYSTEM_INSTRUCTION,
+    };
+
+    if (finalConfig.responseSchema) {
+       finalConfig.responseMimeType = "application/json";
+    }
+
+    const response = await ai.models.generateContent({
+      model: modelName,
+      contents: formattedContents, 
+      config: finalConfig,
+    });
+
+    // Handle Image Feature (Extract from inlineData)
+    const imagePart = response.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData && p.inlineData.mimeType.startsWith('image/'));
+    if (feature === 'image' && imagePart) {
+      return res.status(200).json({ feature, output: imagePart.inlineData?.data });
+    }
+
+    // Handle Audio Feature
+    const isAudio = modelConfig?.responseModalities?.[0] === 'AUDIO';
+    if (isAudio) {
+      const audioPart = response.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData && p.inlineData.mimeType.startsWith('audio/'));
+      return res.status(200).json({ feature, output: audioPart?.inlineData?.data });
+    }
+
+    const outputText = response.text || "";
+    
+    // Return main text + grounding metadata for Search/Maps
+    return res.status(200).json({
+      feature,
+      output: outputText,
+      groundingMetadata: response.candidates?.[0]?.groundingMetadata
+    });
+    
+  } catch (error: any) {
+    console.error("[LifePal API Error]:", error);
+    return res.status(500).json({ error: error.message || 'An internal error occurred with the AI engine.' });
+  }
+}
