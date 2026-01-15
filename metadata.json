@@ -1,0 +1,9 @@
+{
+  "name": " LifePal - Cancer Care & Support",
+  "description": "A compassionate digital companion for cancer patients, caregivers, and children, providing AI support, impact tracking, and resource navigation.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
